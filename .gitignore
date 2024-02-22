@@ -1,1 +1,3 @@
 wandb/
+tmp/
+__pycache__
