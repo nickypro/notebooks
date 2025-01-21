@@ -1,3 +1,7 @@
 wandb/
 tmp/
 __pycache__
+*.pt
+*.npy
+*.png
+*.jsonl
