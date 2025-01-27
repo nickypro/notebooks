@@ -7,3 +7,4 @@ __pycache__
 *.jsonl
 *env
 *.pkl
+.DS_Store
