@@ -6,3 +6,4 @@ __pycache__
 *.png
 *.jsonl
 *env
+*.pkl
