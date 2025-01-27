@@ -119,17 +119,16 @@ def train_model(_model):
     c.num_files  = 99      # Increased number of files for training
     c.lr = 1e-4
     c.weight_decay = 1e-5
-
     # Use weight decay for regularization
     optimizer = torch.optim.Adam(_model.parameters(), lr=c.lr, weight_decay=c.weight_decay)
 
-    for epoch in range(num_epochs):
+    for epoch in range(c.num_epochs):
         # Training
         _model.train()
         train_loss = 0
         train_batches = 0
         # Process files in chunks to manage memory
-        for file_idx in (pbar := tqdm(range(num_files), desc=f"Epoch {epoch+1}")):
+        for file_idx in (pbar := tqdm(range(c.num_files), desc=f"Epoch {epoch+1}")):
             # Load and normalize data for current file
             res_data = load_res_data(file_idx)
             embeds = load_embeds(file_idx)
@@ -137,7 +136,7 @@ def train_model(_model):
             dataset = TensorDataset(res_data, embeds)
 
             # Split into train/val for this file
-            train_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+            train_loader = DataLoader(dataset, batch_size=c.batch_size, shuffle=True)
 
             # Train on current file
             for x, y in train_loader:
@@ -167,7 +166,7 @@ def train_model(_model):
             embeds = load_embeds(file_idx+1)
 
             dataset = TensorDataset(res_data, embeds)
-            test_loader = DataLoader(dataset, batch_size=batch_size)
+            test_loader = DataLoader(dataset, batch_size=c.batch_size)
             for x, y in test_loader:
                 x, y = normalize_res(x.to(DEVICE)), normalize_emb(y.to(DEVICE))
                 outputs = _model(x)
