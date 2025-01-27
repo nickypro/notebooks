@@ -49,7 +49,8 @@ if os.path.exists(OUTPUT_FILE):
 for data in dataset:
     data["split"] = [
         data["split"][0],
-        *[x+"\n\n" for x in data["split"][1:-1]]
+        *[x+"\n\n" for x in data["split"][1:-1]],
+        data["split"][-1]
     ]
 
 with open(OUTPUT_FILE, 'w') as outfile:
@@ -58,3 +59,32 @@ with open(OUTPUT_FILE, 'w') as outfile:
         del data['completion']
         json.dump(data, outfile)
         outfile.write('\n')
+
+# %%
+# import json
+# format_prompt = lambda _text : f"""<|start_header_id|>user<|end_header_id|>
+# {_text}<|eot_id|>
+# <|start_header_id|>assistant<|end_header_id|>
+# """
+
+# DATASET_FILE = '/workspace/SPAR/gen-dataset/rp_outputs_3b_combined.jsonl'
+# OUTPUT_FILE = '/workspace/SPAR/gen-dataset/split_indexed_dataset.jsonl'
+# NEW_OUTPUT = '/workspace/SPAR/gen-dataset/new_split_dataset.jsonl'
+# with open(OUTPUT_FILE, 'r') as f:
+#     dataset_new = [json.loads(line) for line in f]
+
+# with open(DATASET_FILE, 'r') as f:
+#     dataset_old = [json.loads(line) for line in f]
+
+# for old, new in zip(dataset_old, dataset_new):
+#     split = [format_prompt(old["prompt"]), *old["completion"].split("\n\n")]
+#     split = [split[0], *[x+"\n\n" for x in split[1:-1]], split[-1]]
+#     new["split"] = split
+
+# with open(NEW_OUTPUT, 'w') as outfile:
+#     for data in dataset_new:
+#         json.dump(data, outfile)
+#         outfile.write('\n')
+
+
+# # %%

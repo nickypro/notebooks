@@ -54,6 +54,7 @@ for i, data in enumerate(tqdm(dataset)):
 
     batch.append(good_res)
 
-
+batch_index += 1
+torch.save(batch, f"./tensors/res_data_{batch_index:03d}.pt")
 
 # %%
