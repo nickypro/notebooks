@@ -1,154 +1,43 @@
 # %%
-import pickle
-import os
-import gc
-from tqdm import tqdm
 import torch
-import torch.nn as nn
-from torch.utils.data import DataLoader, TensorDataset
-import wandb
 
 from utils_load_data import load_res_data, load_embeds, load_paragraphs
 from utils_welford   import load_or_compute_welford_stats
-from utils_models    import Linear, MLP
+from utils_train     import Trainer
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 torch.set_grad_enabled(False)
 
-GROUPS_TO_LOAD = 2
-D_MLP = 1024 * 8
-BATCH_SIZE = 512
-
-res_data   = load_res_data(0, groups_to_load=GROUPS_TO_LOAD)
+# %% Training Configuration
+config = {
+    'model_type': 'linear',  # 'mlp' or 'linear'
+    #'d_mlp': 1024 * 4,
+    'batch_size': 512,
+    'num_epochs': 10,
+    'num_files': 99,
+    'group_size': 4,
+    'groups_to_load': 2,
+    'lr': 1e-4,
+    'weight_decay': 1e-5,
+    'dropout': 0.1
+}
+res_data   = load_res_data(0, groups_to_load=config['groups_to_load'])
 embeds     = load_embeds(0)
 paragraphs = load_paragraphs()
+config['d_res']   = res_data.shape[-1]
+config['d_sonar'] = embeds.shape[-1]
+c = config
 
-print("embeds shape  : ", embeds.shape)
-print("res data shape: ", res_data.shape)
-print("paragraphs    : ", len(paragraphs))
-
-D_RES = res_data.shape[-1]
-D_SONAR = embeds.shape[-1]
-
-# %% # Make sure data is normalized, using Welford Online
-welford_data = load_or_compute_welford_stats(GROUPS_TO_LOAD)
-norm_res, norm_emb = welford_data.norm_res, welford_data.norm_emb
-
-# %%
-# Train linear model
-# Create model
+# %% Welford Data Normalization
 
 
-def train_model(ChosenModelType):
-    torch.set_grad_enabled(True)
-    wandb.init()
-    c = wandb.config
+# Create and run trainer
+trainer = Trainer(config, DEVICE)
+model = trainer.train()
 
-    # Training loop
-    c.batch_size = BATCH_SIZE  # Reduced batch size for less memory usage
-    c.num_epochs = 10     # Increased epochs for better convergence
-    c.num_files  = 99      # Increased number of files for training
-    c.groups_to_load = GROUPS_TO_LOAD
-    c.lr = 1e-4
-    c.weight_decay = 1e-5
-    c.d_res   = D_RES
-    c.d_mlp   = D_MLP
-    c.d_sonar = D_SONAR
-    # Use weight decay for regularization
-
-    criterion = nn.MSELoss()
-    _model = ChosenModelType(c).to(DEVICE)
-    optimizer = torch.optim.Adam(_model.parameters(), lr=c.lr, weight_decay=c.weight_decay)
-
-    for epoch in range(c.num_epochs):
-        # Training
-        _model.train()
-        train_loss = 0
-        train_batches = 0
-        # Process files in chunks to manage memory
-        for file_idx in (pbar := tqdm(range(c.num_files), desc=f"Epoch {epoch+1}")):
-            # Load and normalize data for current file
-            res_data = load_res_data(file_idx, groups_to_load=c.groups_to_load)
-            embeds = load_embeds(file_idx)
-
-            dataset = TensorDataset(res_data, embeds)
-
-            # Split into train/val for this file
-            train_loader = DataLoader(dataset, batch_size=c.batch_size, shuffle=True)
-
-            # Train on current file
-            for x, y in train_loader:
-                x, y = norm_res(x.to(DEVICE)), norm_emb(y.to(DEVICE))
-
-                optimizer.zero_grad()
-                outputs = _model(x)
-                loss = criterion(outputs, y)
-                loss.backward()
-                optimizer.step()
-                train_loss += loss.item()
-                train_batches += 1
-
-                # Update tqdm bar with current loss
-                pbar.set_postfix({"Loss": f"{train_loss/train_batches:.4f}"})
-
-            # Clean up memory
-            del res_data, embeds, dataset
-            gc.collect()
-            torch.cuda.empty_cache()
-
-        # Validation (using last file's validation set)
-        _model.eval()
-        val_loss = 0
-        with torch.no_grad():
-            res_data = load_res_data(file_idx+1, groups_to_load=GROUPS_TO_LOAD)
-            embeds = load_embeds(file_idx+1)
-
-            dataset = TensorDataset(res_data, embeds)
-            test_loader = DataLoader(dataset, batch_size=c.batch_size)
-            for x, y in test_loader:
-                x, y = norm_res(x.to(DEVICE)), norm_emb(y.to(DEVICE))
-                outputs = _model(x)
-                val_loss += criterion(outputs, y).item()
-            del res_data, embeds, dataset
-            gc.collect()
-            torch.cuda.empty_cache()
-
-        wandb.log({
-            "epoch": epoch+1,
-            "train_loss": train_loss / train_batches,
-            "val_loss": val_loss / len(test_loader) if train_batches > 0 else float('inf'),
-        })
-
-        print(f"Epoch {epoch+1}: Train Loss: {train_loss/train_batches:.4f}, Val Loss: {val_loss/len(test_loader):.4f}")
-    return _model
-
-# %%
-filename = f"./checkpoints/mlp_99_{GROUPS_TO_LOAD}_{D_MLP}.pkl"
-
-ChosenModelType = MLP
-
-if not os.path.exists(filename):
-    model = train_model(ChosenModelType)
-    # Train and save model if checkpoint doesn't exist
-    with open(filename, 'wb') as f:
-        pickle.dump({
-            'model': model,
-            'welford_emb': welford_emb,
-            'welford_res': welford_res,
-        }, f)
-else:
-    # Load model if checkpoint exists
-    c = {}
-    c.d_res, c.d_mlp, c.d_sonar = D_RES, D_MLP, D_SONAR
-    model = ChosenModelType(c)
-    with open(filename, 'rb') as f:
-        checkpoint = pickle.load(f)
-        model.load_state_dict(checkpoint['model'].state_dict())
-        welford_emb = checkpoint['welford_emb']
-        welford_res = checkpoint['welford_res']
-
-    model = model.to('cuda')
-
+# Save checkpoint
+filename = f"./checkpoints/{c['model_type']}_{c['num_files']}_{c['groups_to_load']}_{c['d_mlp']}.pkl"
+trainer.save_checkpoint(filename)
 
 # %%
 # Test outputs
