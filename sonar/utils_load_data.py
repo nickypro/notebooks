@@ -6,7 +6,6 @@ import einops
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 torch.set_grad_enabled(False)
 
-
 def load_res_data(index, group_size=4, groups_to_load=2):
     file_path = f"./tensors/res_data_{index:03d}.pt"
     data = torch.load(file_path, map_location="cpu", weights_only=False)
@@ -31,4 +30,3 @@ def load_paragraphs():
     splits = [x["split"][1:] for x in data]
     splits = [item for sublist in splits for item in sublist]
     return splits
-

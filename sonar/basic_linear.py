@@ -2,23 +2,25 @@
 import pickle
 import os
 import gc
-from time import time
-import json
 from tqdm import tqdm
 import torch
-import einops
 import torch.nn as nn
-from welford_torch import Welford
 from torch.utils.data import DataLoader, TensorDataset
 import wandb
 
-from load_data import load_res_data, load_embeds, load_paragraphs
+from utils_load_data import load_res_data, load_embeds, load_paragraphs
+from utils_welford   import load_or_compute_welford_stats, normalize_emb, normalize_res, restore_emb
+from utils_models    import Linear, MLP
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 torch.set_grad_enabled(False)
 
+GROUPS_TO_LOAD = 2
+D_MLP = 1024 * 8
+BATCH_SIZE = 512
+
+res_data   = load_res_data(0, groups_to_load=GROUPS_TO_LOAD)
 embeds     = load_embeds(0)
-res_data   = load_res_data(0, groups_to_load=3)
 paragraphs = load_paragraphs()
 
 print("embeds shape  : ", embeds.shape)
@@ -28,98 +30,34 @@ print("paragraphs    : ", len(paragraphs))
 D_RES = res_data.shape[-1]
 D_SONAR = embeds.shape[-1]
 
-# %%
-
-# Try to load Welford statistics from pickle file, compute if not exists
-try:
-    with open('./welford_data/welford_stats_10.pkl', 'rb') as f:
-        print("Loading existing welford data")
-        welford_stats = pickle.load(f)
-        welford_emb = welford_stats['welford_emb']
-        welford_res = welford_stats['welford_res']
-
-except FileNotFoundError:
-    welford_emb = Welford()
-    welford_res = Welford()
-
-    for i in tqdm(range(10)):
-        res_data = load_res_data(i).cuda()
-        embeds = load_embeds(i).cuda()
-
-        welford_res.add_all(res_data)
-        welford_emb.add_all(embeds)
-        del res_data, embeds
-        gc.collect()
-        torch.cuda.empty_cache()
-
-    # Save Welford statistics for first 10 files using pickle
-
-    os.makedirs('./welford_data', exist_ok=True)
-    with open('./welford_data/welford_stats_10.pkl', 'wb') as f:
-        pickle.dump({
-            'welford_emb': welford_emb,
-            'welford_res': welford_res
-        }, f)
-
-# %%
-
-def normalize_res(res_data):
-    """Normalize residual data using precomputed mean and variance"""
-    return (res_data - welford_res.mean) / torch.sqrt(welford_res.var_s + 1e-8)
-
-def normalize_emb(emb_data):
-    """Normalize embedding data using precomputed mean and variance"""
-    return (emb_data - welford_emb.mean) / torch.sqrt(welford_emb.var_s + 1e-8)
-
-def restore_emb(normed_emb_data):
-    """Restore normalized embedding data to original scale using precomputed mean and variance"""
-    return normed_emb_data * torch.sqrt(welford_emb.var_s + 1e-8) + welford_emb.mean
+# %% # Make sure data is normalized, using Welford Online
+welford_emb, welford_res = load_or_compute_welford_stats(GROUPS_TO_LOAD)
 
 # %%
 # Train linear model
 # Create model
 
-class Linear(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.linear = nn.Linear(D_RES, D_SONAR)
-
-    def forward(self, x):
-        return self.linear(x)
-class MLP(nn.Module):
-    def __init__(self):
-        super().__init__()
-        # More balanced hidden layer dimensions based on input/output sizes
-        d_hidden1 = 1024*8  # First hidden layer dimension
-        d_hidden2 = 1024*8  # Second hidden layer dimension
-        self.sequential = nn.Sequential(
-            nn.Linear(D_RES, d_hidden1),
-            nn.GELU(),
-            nn.Dropout(0.1),  # Add dropout for regularization
-            nn.Linear(d_hidden1, d_hidden2),
-            nn.GELU(),
-            nn.Dropout(0.1),
-            nn.Linear(d_hidden2, D_SONAR)
-        )
-
-    def forward(self, x):
-        return self.sequential(x)
 
 def train_model(_model):
 
+    torch.set_grad_enabled(True)
     wandb.init()
     c = wandb.config
-    torch.set_grad_enabled(True)
-    _model = ResidualToEmbed().to(DEVICE)
-    criterion = nn.MSELoss()
 
     # Training loop
-    c.batch_size = 256  # Reduced batch size for less memory usage
+    c.batch_size = BATCH_SIZE  # Reduced batch size for less memory usage
     c.num_epochs = 10     # Increased epochs for better convergence
     c.num_files  = 99      # Increased number of files for training
+    c.groups_to_load = GROUPS_TO_LOAD
     c.lr = 1e-4
     c.weight_decay = 1e-5
+    c.d_res   = D_RES
+    c.d_mlp   = D_MLP
+    c.d_sonar = D_SONAR
     # Use weight decay for regularization
+
+    criterion = nn.MSELoss()
+    _model = ResidualToEmbed().to(DEVICE)
     optimizer = torch.optim.Adam(_model.parameters(), lr=c.lr, weight_decay=c.weight_decay)
 
     for epoch in range(c.num_epochs):
@@ -130,7 +68,7 @@ def train_model(_model):
         # Process files in chunks to manage memory
         for file_idx in (pbar := tqdm(range(c.num_files), desc=f"Epoch {epoch+1}")):
             # Load and normalize data for current file
-            res_data = load_res_data(file_idx)
+            res_data = load_res_data(file_idx, groups_to_load=c.groups_to_load)
             embeds = load_embeds(file_idx)
 
             dataset = TensorDataset(res_data, embeds)
@@ -162,7 +100,7 @@ def train_model(_model):
         _model.eval()
         val_loss = 0
         with torch.no_grad():
-            res_data = load_res_data(file_idx+1)
+            res_data = load_res_data(file_idx+1, groups_to_load=GROUPS_TO_LOAD)
             embeds = load_embeds(file_idx+1)
 
             dataset = TensorDataset(res_data, embeds)
@@ -185,10 +123,11 @@ def train_model(_model):
     return _model
 
 # %%
-filename = "./checkpoints/mlp_99_triple.pkl"
+filename = f"./checkpoints/mlp_99_{GROUPS_TO_LOAD}_{D_MLP}.pkl"
 
 ResidualToEmbed = MLP
 model = ResidualToEmbed()
+print(model)
 
 if not os.path.exists(filename):
     model = train_model(model)
