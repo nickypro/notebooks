@@ -9,7 +9,7 @@ from torch.utils.data import DataLoader, TensorDataset
 import wandb
 
 from utils_load_data import load_res_data, load_embeds, load_paragraphs
-from utils_welford   import load_or_compute_welford_stats, normalize_emb, normalize_res, restore_emb
+from utils_welford   import load_or_compute_welford_stats
 from utils_models    import Linear, MLP
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -31,15 +31,15 @@ D_RES = res_data.shape[-1]
 D_SONAR = embeds.shape[-1]
 
 # %% # Make sure data is normalized, using Welford Online
-welford_emb, welford_res = load_or_compute_welford_stats(GROUPS_TO_LOAD)
+welford_data = load_or_compute_welford_stats(GROUPS_TO_LOAD)
+norm_res, norm_emb = welford_data.norm_res, welford_data.norm_emb
 
 # %%
 # Train linear model
 # Create model
 
 
-def train_model(_model):
-
+def train_model(ChosenModelType):
     torch.set_grad_enabled(True)
     wandb.init()
     c = wandb.config
@@ -57,7 +57,7 @@ def train_model(_model):
     # Use weight decay for regularization
 
     criterion = nn.MSELoss()
-    _model = ResidualToEmbed().to(DEVICE)
+    _model = ChosenModelType(c).to(DEVICE)
     optimizer = torch.optim.Adam(_model.parameters(), lr=c.lr, weight_decay=c.weight_decay)
 
     for epoch in range(c.num_epochs):
@@ -78,7 +78,7 @@ def train_model(_model):
 
             # Train on current file
             for x, y in train_loader:
-                x, y = normalize_res(x.to(DEVICE)), normalize_emb(y.to(DEVICE))
+                x, y = norm_res(x.to(DEVICE)), norm_emb(y.to(DEVICE))
 
                 optimizer.zero_grad()
                 outputs = _model(x)
@@ -106,7 +106,7 @@ def train_model(_model):
             dataset = TensorDataset(res_data, embeds)
             test_loader = DataLoader(dataset, batch_size=c.batch_size)
             for x, y in test_loader:
-                x, y = normalize_res(x.to(DEVICE)), normalize_emb(y.to(DEVICE))
+                x, y = norm_res(x.to(DEVICE)), norm_emb(y.to(DEVICE))
                 outputs = _model(x)
                 val_loss += criterion(outputs, y).item()
             del res_data, embeds, dataset
@@ -125,12 +125,10 @@ def train_model(_model):
 # %%
 filename = f"./checkpoints/mlp_99_{GROUPS_TO_LOAD}_{D_MLP}.pkl"
 
-ResidualToEmbed = MLP
-model = ResidualToEmbed()
-print(model)
+ChosenModelType = MLP
 
 if not os.path.exists(filename):
-    model = train_model(model)
+    model = train_model(ChosenModelType)
     # Train and save model if checkpoint doesn't exist
     with open(filename, 'wb') as f:
         pickle.dump({
@@ -140,6 +138,9 @@ if not os.path.exists(filename):
         }, f)
 else:
     # Load model if checkpoint exists
+    c = {}
+    c.d_res, c.d_mlp, c.d_sonar = D_RES, D_MLP, D_SONAR
+    model = ChosenModelType(c)
     with open(filename, 'rb') as f:
         checkpoint = pickle.load(f)
         model.load_state_dict(checkpoint['model'].state_dict())
@@ -160,7 +161,7 @@ with torch.no_grad():
     for index in [1, 100, 200, 300, 500, 800, 1000]:
         orig_emb   = embeds[index].unsqueeze(dim=0).to(DEVICE)
         test_input = res_data[index].unsqueeze(dim=0).to(DEVICE)
-        predicted_embed = restore_emb(model(test_input))
+        predicted_embed = norm_emb.restore(model(test_input))
         decoded_text = vec2text_model.predict(
             torch.cat([orig_emb, predicted_embed], dim=0),
             target_lang="eng_Latn"
