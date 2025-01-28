@@ -19,6 +19,9 @@ class Trainer:
         self.normalizer_emb = welford_data.norm_emb
         self.normalizer_res = welford_data.norm_res
 
+        d_res = load_res_data(0, self.c.group_size, self.c.groups_to_load).shape[-1]
+        self._config["d_res"] = d_res
+
         # Initialize model
         self.model = self._init_model().to(device)
         self.optimizer = torch.optim.Adam(
@@ -96,7 +99,6 @@ class Trainer:
 
     def train(self):
         torch.set_grad_enabled(True)
-        wandb.init(project="notebooks-sonar", config=self.c)
 
         for epoch in range(self.c.num_epochs):
             train_loss = self.train_epoch(epoch)
