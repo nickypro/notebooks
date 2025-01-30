@@ -15,7 +15,7 @@ def main():
 
 if __name__ == "__main__":
     trainer = main()
-    trainer.model.eval()
+    #trainer.model.eval()
     DEVICE = trainer.device
 
     print("Testing some outputs")
@@ -29,18 +29,28 @@ if __name__ == "__main__":
         for index in [1, 42, 100, 200, 300, 500, 800, 1000, 1234, 2345, 3456]:
             orig_emb   = embeds[index].unsqueeze(dim=0).to(DEVICE)
             test_input = trainer.normalizer_res(res_data[index].unsqueeze(dim=0).to(DEVICE))
-            predicted_embed = trainer.normalizer_emb.restore(trainer.model(test_input))
+            test_input_batch = test_input.repeat(3, 1)  # Create a batch of 3 copies along dim=0
+            predicted_embeds = trainer.normalizer_emb.restore(trainer.model(test_input_batch))
             decoded_text = vec2text_model.predict(
-                torch.cat([orig_emb, predicted_embed], dim=0),
+                torch.cat([orig_emb, predicted_embeds], dim=0),
                 target_lang="eng_Latn"
             )
-            print(f"### EXAMPLE {index} ###")
+            cossim = torch.nn.functional.cosine_similarity(orig_emb[0], predicted_embeds[0], dim=0).item():.4f}
+            print(f"### EXAMPLE {index} ### (SIM = {cossim})")
 
             print(textwrap.fill(colored(f"ORIGINAL: {decoded_text[0][:200]}", 'blue'),
                               width=120,
                               initial_indent='',
                               subsequent_indent=' ' * 10))
             print(textwrap.fill(colored(f"PROBE   : {decoded_text[1][:200]}", 'green'),
+                              width=120,
+                              initial_indent='',
+                              subsequent_indent=' ' * 10))
+            print(textwrap.fill(colored(f"PROBE   : {decoded_text[2][:200]}", 'green'),
+                              width=120,
+                              initial_indent='',
+                              subsequent_indent=' ' * 10))
+            print(textwrap.fill(colored(f"PROBE   : {decoded_text[3][:200]}", 'green'),
                               width=120,
                               initial_indent='',
                               subsequent_indent=' ' * 10))
