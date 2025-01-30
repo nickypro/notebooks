@@ -129,10 +129,27 @@ class Trainer:
         with open(filename, 'rb') as f:
             checkpoint = pickle.load(f)
 
-        config = checkpoint['config']
+        config = checkpoint['config'].__dict__
         normalizer_emb = Normalizer(checkpoint['welford_emb'])
         normalizer_res = Normalizer(checkpoint['welford_res'])
 
-        trainer = cls(config, normalizer_emb, normalizer_res, device)
+        print(config)
+        trainer = cls(config, device)
         trainer.model.load_state_dict(checkpoint['model'])
         return trainer
+
+    @classmethod
+    def load_from_wandb(cls, run_name, device=None):
+        """Load model directly from W&B run name."""
+        run = wandb.Api().run(run_name)
+        run_id = run.id
+        model_type = run.config['model_type']
+        filename = f"./checkpoints/sweeps/{run_id}_{model_type}.pkl"
+
+        if not os.path.exists(filename):
+            raise FileNotFoundError(f"Checkpoint file not found: {filename}")
+
+        if device is None:
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        return cls.load_checkpoint(filename, device=device)
