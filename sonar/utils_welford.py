@@ -52,8 +52,14 @@ def load_or_compute_welford_stats(groups_to_load):
             res_data = load_res_data(i, groups_to_load=groups_to_load).cuda()
             embeds = load_embeds(i).cuda()
 
-            welford_res.add_all(res_data)
-            welford_emb.add_all(embeds)
+            batch_size = 1000
+            num_samples = res_data.size(0)
+            for i in range(0, num_samples, batch_size):
+                end_idx = i + batch_size
+                batch_res = res_data[i:end_idx]
+                batch_emb = embeds[i:end_idx]
+                welford_res.add_all(batch_res)
+                welford_emb.add_all(batch_emb)
             del res_data, embeds
             gc.collect()
             torch.cuda.empty_cache()
