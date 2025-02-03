@@ -91,6 +91,11 @@ class Trainer:
                 outputs = self.model(x)
                 val_loss += self.criterion(outputs, y).item()
 
+                # clear cache
+                del x, y, outputs
+                gc.collect()
+                torch.cuda.empty_cache()
+
             del res_data, embeds, dataset
             gc.collect()
             torch.cuda.empty_cache()
