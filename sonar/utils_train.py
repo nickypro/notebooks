@@ -31,6 +31,11 @@ class Trainer:
         )
         self.criterion = torch.nn.MSELoss()
 
+        # Initialize learning rate scheduler: reduce LR by a factor of 0.9 every
+        # epoch
+        self.lr_decay = self.c.lr_decay if "lr_decay" in self._config else 1.0
+        self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=1, gamma=self.lr_decay)
+
     @property
     def c(self):
         return SimpleNamespace(**self._config)
@@ -117,6 +122,9 @@ class Trainer:
 
             print(f"Epoch {epoch+1}: Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
 
+            # Step the learning rate scheduler
+            self.scheduler.step()
+
         return self.model
 
     def save_checkpoint(self, filename):
@@ -148,6 +156,7 @@ class Trainer:
         """Load model directly from W&B run name."""
         run = wandb.Api().run(run_name)
         run_id = run.id
+        print(run, run.config)
         model_type = run.config['model_type']
         filename = f"./checkpoints/sweeps/{run_id}_{model_type}.pkl"
 
