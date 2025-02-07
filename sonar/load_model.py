@@ -19,7 +19,7 @@ def main():
 
 if __name__ == "__main__":
     trainer = main()
-    #trainer.model.eval()
+    trainer.model.eval()
     DEVICE = trainer.device
 
     print("Testing some outputs")
