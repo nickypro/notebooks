@@ -16,7 +16,7 @@ from transformers import AutoTokenizer
 torch.set_grad_enabled(False)
 
 # %%
-LIMIT = 100
+LIMIT = None
 
 # DEFINE CODE FOR BATCHED GENERATION
 
@@ -106,29 +106,61 @@ def main(verbose=False):
     n_paragraphs = embeds.shape[0]
     contexts = utils_load_data.load_full_contexts()
     contexts = contexts[-n_paragraphs:]
+    if LIMIT:
+        contexts = contexts[:LIMIT]
     n_texts = len(contexts)
 
-    print(len(contexts), type(contexts), type(contexts[0]))
-    print(contexts[0])
-    print(contexts[1])
-    print(contexts[2])
+    # print(contexts[0])
+    # print(contexts[1])
+    # print(contexts[2])
 
     # Encode paragraphs
     context_tokens = m.tokenizer(contexts, padding=True, truncation=False, max_length=1000, return_tensors="pt")
-    token_ids = context_tokens.input_ids
-    attn_mask = context_tokens.attention_mask
+    print(context_tokens.input_ids.shape, type(contexts), type(contexts[0]))
+    orig_token_ids = context_tokens.input_ids
+    orig_attn_mask = context_tokens.attention_mask
+    orig_lengths = orig_attn_mask.sum(dim=1)
 
-    batch_size = 5
-    outputs = []
-    for i in tqdm(range(0, n_texts, batch_size)):
-        prompt = torch.tensor(token_ids[i:i+batch_size], dtype=torch.long, device=m.device)
-        masks  = torch.tensor(attn_mask[i:i+batch_size], dtype=torch.long, device=m.device)
-        _prompts, texts = generate_batch_fast(m, prompt, masks, args.max_new_tokens, args.temperature, exclude_tokens=0)
+    sorted_indices = np.argsort(orig_lengths)
+
+    attn_sorted = orig_attn_mask[sorted_indices]
+    ids_sorted  = orig_token_ids[sorted_indices]
+    lengths     = orig_lengths[sorted_indices]
+
+    max_batch_tokens = 8000
+    max_new_tokens = args.max_new_tokens
+
+    i = 0
+    batch_size = 16
+    outputs = [""] * n_texts
+    pbar = tqdm(total=n_texts, desc="Generating")
+    while i < n_texts:
+        # Determine the size of the current batch (in case fewer samples remain)
+        j = i
+        while True:
+            j += 1
+            if j >= n_texts:
+                break
+            if (j+1-i) * (lengths[j] + max_new_tokens) > max_batch_tokens:
+                break
+
+        curr_len = lengths[j-1]
+        prompts = ids_sorted[i:j, -curr_len:].to(m.device)
+        masks   = attn_sorted[i:j, -curr_len:].to(m.device)
+        assert attn_sorted[i:j, :-curr_len].sum() == 0, f"Non-Padding tokens discarded, {attn_sorted[i:j, :-curr_len].shape} {attn_sorted[i:j, :-curr_len].sum()}, -{curr_len}"
+
+        _prompts, texts = generate_batch_fast(m, prompts, masks, args.max_new_tokens, args.temperature, exclude_tokens=0)
         texts = [t.split('\n\n')[0] for t in texts]
-        outputs.extend(texts)
 
-        if LIMIT and i+batch_size >= LIMIT:
-            break
+        indices = sorted_indices[i:j]
+        for text, index in zip(texts, indices):
+            outputs[index] = text
+
+        pbar.update(j-i)
+        i = j
+
+
+    pbar.close()
 
     result_data = {
         "model": m.model_repo,
