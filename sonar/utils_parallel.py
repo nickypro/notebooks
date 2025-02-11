@@ -17,7 +17,7 @@ def exponential_backoff(func, max_retries=10, initial_delay=1, backoff_factor=2)
                 if retries == max_retries:
                     print(f"Max retries reached. Error: {e}")
                     raise
-                print(f"Retry {retries}/{max_retries}. Waiting {delay} seconds...")
+                print(f"Retry {retries}/{max_retries}. Waiting {delay} seconds... {e}")
                 time.sleep(delay)
                 delay *= backoff_factor  # Exponential increase in delay
     return wrapper
