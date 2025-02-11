@@ -1,4 +1,3 @@
-
 # %%
 import os
 import json
@@ -41,8 +40,8 @@ How similar is the subject of the response (Text 2) to the reference (Text 1)?
 0: Completelly unrelated subjects ("corporate law" vs "particle physics")
 1: Vaguely similar field (e.g: "biology" vs "physics" are both sciences)
 2: Related general domain or adjacent fields (e.g., "history" vs. "archaeology" or "alternative medicine" vs. "traditional remedies").
-3: Same subject (e.g., both discuss “ancient mayans” or "the properties of the human body").
-4: Identical focus (e.g., both analyze “ancient mayan architecture”).
+3: Same subject (e.g., both discuss "ancient mayans" or "the properties of the human body").
+4: Identical focus (e.g., both analyze "ancient mayan architecture").
 
 #### 4. Entities
 How similar are the entities in the response (Text 2) to the reference (Text 1)?
@@ -50,28 +49,28 @@ How similar are the entities in the response (Text 2) to the reference (Text 1)?
 0: Completelly unrelated ("Norway" vs "smartphone")
 1: Vaguely similar category (e.g: the same kinds of entities, e.g: countries, humans, cities)
 2: Similar category (e.g., countries similar in name or heritage, similar profession people, similar types of objects).
-3: Partial identical entities (e.g., both mention “Nigella sativa” but differ in others).
-4: Almost all key entities match exactly (e.g., both list “Nigella sativa, thymoquinone, antioxidants”).
+3: Partial identical entities (e.g., both mention "Nigella sativa" but differ in others, or both mention two different names for the same entity, e.g "Major nutrients" vs "Macro-nutrients").
+4: Almost all key entities match exactly (e.g., both list "Nigella sativa, thymoquinone, antioxidants").
 
 #### 5. Details
 How similar are the details in the response (Text 2) to the reference (Text 1)?
--1: No details to compare.
-0: No comparable details (e.g., Text 1 lists benefits; Text 2 is generic).
-1: Minimal depth (e.g., both mention “anti-inflammatory properties” with no specifics).
+-1: Neither text has details to compare.
+0: Details differ completely (e.g., Text 1 lists benefits; Text 2 is generic).
+1: Minimal depth (e.g., both mention "anti-inflammatory properties" with no specifics).
 2: Moderate depth (e.g., discuss benefits + 1-2 supporting facts).
 3: Highly specific details (e.g., "40% reduction in inflammation").
 
 #### 6. Terminology
 How similar is the terminology in the response (Text 2) to the reference (Text 1)?
 -1: No terminology to compare.
-0: No shared terms (e.g., “bioactive compounds” vs. “natural stuff”).
-1: Some overlap (e.g., both mention “anti-inflammatory” but lack technical terms).
-2: Domain-specific alignment in style (e.g., “apoptosis inhibition” vs. "cell death prevention" = jargon mismatch).
+0: No shared terms (e.g., "bioactive compounds" vs. "natural stuff").
+1: Some overlap (e.g., both mention at least some terms, such as "anti-inflammatory", or similar terms for the same level concept, such as "inflamation reduction").
+2: Domain-specific alignment in style (e.g., "apoptosis inhibition" vs. "cell death prevention" = jargon mismatch).
 
 #### 7. Tone
 How similar is the tone of the response (Text 2) to the reference (Text 1)?
 0: Mismatched (e.g., clinical vs. casual, or positive vs. neutral vs. negative. E.g: "This sucks" vs "This is good").
-1: Consistent (e.g., both neutral clinical: “studies suggest benefits” vs. “research indicates”).
+1: Consistent (e.g., both neutral clinical: "studies suggest benefits" vs. "research indicates").
 
 #### 8. Identical
 Is the response (Text 2) essentially identical to the reference (Text 1)?
@@ -136,12 +135,14 @@ def ruberic_compare(ref_text, comp_text):
         "The output must be a valid JSON object and nothing else."
     )
     client = OpenAI(
+        #api_key=os.getenv("OPENAI_API_KEY", "YOUR_API_KEY"),
         api_key=os.getenv("OPENROUTER_API_KEY", "YOUR_API_KEY"),
         base_url="https://openrouter.ai/api/v1"
     )
     response = client.chat.completions.create(
         #model="openai/o3-mini",
         model="openai/gpt-4o-mini",
+        #model="gpt-4o-mini",
         # model="meta-llama/llama-3.3-70b-instruct",
         messages=[{
             "role": "user",
@@ -161,7 +162,25 @@ def get_ruberic_comparison(ref_texts: List[str], comp_texts: List[str], label=No
     for index, (ref_text, comp_text) in enumerate(zip(ref_texts, comp_texts)):
         result = ruberic_compare(ref_text, comp_text)
         results.append(result)
+        print({"index": index, "type": label, "reference": ref_text, "comparison": comp_text, "result": result})
+    return results
+
+def get_ruberic_parallel(ref_texts: List[str], comp_texts: List[str], label=None):
+    items = list(zip(np.arange(len(ref_texts)), ref_texts, comp_texts))
+    print(f"Processing {len(items)} comparisons in parallel")
+
+    def get_rubric(items):
+        index, ref_text, comp_text = items
+        result = ruberic_compare(ref_text, comp_text)
         print({"index": index, label: label, "reference": ref_text, "comparison": comp_text, "result": result})
+        return result
+
+    # Process comparisons in parallel
+    results = process_in_parallel(
+        items,
+        get_rubric,
+        max_workers=20
+    )
     return results
 
 def load_texts(file_path: str) -> Tuple[List[str], Dict]:
@@ -198,9 +217,9 @@ def get_ruberic_comparison_data(ref_file, compare_files):
 
         # Filter out texts with a cheat fraction greater than 0.5
         indices = np.where(np.array(comp_data["cheat_fracs"]) <= 0.5)[0] if "cheat_fracs" in comp_data else np.arange(len(comp_texts))
-        ruberic_scores = get_ruberic_comparison(ref_texts[indices], comp_texts[indices], label)
+        ruberic_scores = get_ruberic_parallel(ref_texts[indices], comp_texts[indices], label)
 
-        all_ruberic_scores.extend(ruberic_scores.tolist())
+        all_ruberic_scores.extend(ruberic_scores)
         all_labels.extend([label] * len(ruberic_scores))
 
         with open(f"ruberic_scores/{label}.json", "w") as f:
@@ -219,17 +238,20 @@ if __name__ == "__main__":
     cossim_plot_path = "cossim-plot.png"
 
     # Manually list the files.
-    ref_file = "comparison_texts/original_texts.json"
+    #ref_file = "comparison_texts/original_texts.json"
+    ref_file = "comparison_texts/train_paragraphs_98.json"
     compare_files = {
-        "mlp": "comparison_texts/mlp_decoded_texts.json",
-        "linear": "comparison_texts/linear_decoded_texts.json",
-        "continued": "comparison_texts/parascope_continuation_texts.json",
-        "baseline": "comparison_texts/baseline_0_outputs.json",
-        "cheat-1": "comparison_texts/baseline_1_outputs.json",
-        "cheat-5": "comparison_texts/baseline_5_outputs.json",
-        "cheat-10": "comparison_texts/baseline_10_outputs.json",
-        "regenerated": "comparison_texts/regenerated_outputs.json",
-        "auto-decoded": "comparison_texts/original_decoded_texts.json",
+        #"mlp": "comparison_texts/mlp_decoded_texts.json",
+        #"linear": "comparison_texts/linear_decoded_texts.json",
+        #"continued": "comparison_texts/parascope_continuation_texts.json",
+        #"baseline": "comparison_texts/baseline_0_outputs.json",
+        #"cheat-1": "comparison_texts/baseline_1_outputs.json",
+        #"cheat-5": "comparison_texts/baseline_5_outputs.json",
+        #"cheat-10": "comparison_texts/baseline_10_outputs.json",
+        #"regenerated": "comparison_texts/regenerated_outputs.json",
+        #"auto-decoded": "comparison_texts/original_decoded_texts.json",
+        "mlp-train": "comparison_texts/mlp_train_decoded_texts.json",
+        "linear-train": "comparison_texts/linear_train_decoded_texts.json",
     }
 
     df_plot = get_ruberic_comparison_data(ref_file, compare_files)
