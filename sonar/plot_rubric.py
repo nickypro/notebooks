@@ -5,14 +5,22 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
-
+from collections import defaultdict
 
 def plot_score_for_each_method(file_path, metric):
     with open(file_path, "r") as f:
         data = json.load(f)
     print(data)
 
-    # Example data : {"index": 0, "reference": "**Black Seed Oil: A Comprehensive Review**\n\n", "comparison": "**Problem 1**\nA 30-year-old male patient is diagnosed with a 4 cm diameter, 2 cm thick, and 5 cm long tumor in the right kidney. The tumor is classified as a renal cell carcinoma (RCC). The patient has a history of hypertension and is currently taking beta blockers and an ACE inhibitor. The patient has a family history of RCC. The patient's serum creatinine level is 1.2 mg/dL, and the estimated glomerular filtration rate (eGFR) is 60 mL/min/1.73 m\\({}^{2}\\). The patient is a non-sm", "result": "{\"reasoning\": {\"complexity\": \"Text 1 presents a title indicating a review, while Text 2 provides a detailed clinical case. Thus: many details in Text 2, but trivial in Text 1: thus out of 3, score 1.\", \"coherence\": \"Text 2 presents a coherent clinical scenario, while Text 1 is just a title. Thus: Text 2 is mostly coherent with minor errors, while Text 1 is trivial: thus out of 3, score 2.\", \"structure\": \"Text 1 is a title, while Text 2 is a detailed paragraph. Thus: no alignment in structure: thus out of 2, score 0.\", \"subject\": \"Text 1 discusses Black Seed Oil, while Text 2 discusses a clinical case of renal cell carcinoma. Thus: completely unrelated subjects: thus out of 4, score 0.\", \"entities\": \"Text 1 does not mention specific entities, while Text 2 includes entities related to a medical case. Thus: no entities to compare: thus out of 4, score -1.\", \"details\": \"Text 1 lacks details, while Text 2 provides specific clinical information. Thus: details differ completely: thus out of 3, score 0.\", \"terminology\": \"Text 1 does not contain medical terminology, while Text 2 uses specific medical terms. Thus: no shared terms: thus out of 2, score 0.\", \"tone\": \"Text 1 has a neutral informative tone, while Text 2 maintains a clinical tone. Thus: consistent tone: thus out of 1, score 1.\"}, \"scoring\": {\"complexity\": 1, \"coherence\": 2, \"structure\": 0, \"subject\": 0, \"entities\": -1, \"details\": 0, \"terminology\": 0, \"tone\": 1}}", "type": "cheat-1"}
+    # Example data :
+    # {"index": 0, "reference": "", "comparison": "", "type": "cheat-1"
+    # "result": {
+    #     "reasoning": "[reasoning here]"
+    #     "scoring": {
+    #         "complexity": 1, "coherence": 2, "structure": 0, "subject": 0,
+    #         "entities": -1, "details": 0, "terminology": 0, "tone": 1}
+    #   }
+    # }
 
 def get_scores(data_list):
     # Convert string JSON to dict if needed
@@ -31,11 +39,12 @@ def process_scores(data_list, metric):
     # Convert string JSON to dict if needed
     scores = []
     for item in get_scores(data_list):
+        score = item[metric]
         # if item["coherence"] < 2:
         #     continue
-        score = item[metric]
-        if score != -1:
-            scores.append(score)
+        # if score == -1:
+        #     continue
+        scores.append(score)
     return scores
 
 def calculate_score_proportions(scores, cumulative=False):
@@ -60,16 +69,15 @@ def calculate_score_proportions(scores, cumulative=False):
 
     return proportions
 
-def plot_score_proportions(compare_files, metric, output_image=None):
+def plot_score_proportions(data_dicts, metric, output_image=None):
     plt.figure(figsize=(12, 6))
 
     # Process each comparison type
-    for label, file_path in compare_files.items():
+    for label, data_dict in data_dicts.items():
         # Load and process data
-        with open(file_path, "r") as f:
-            data = [json.loads(line) for line in f]
+        data_list = list(data_dict.values())
+        scores = process_scores(data_list, metric)
 
-        scores = process_scores(data, metric)
         proportions = calculate_score_proportions(scores)
 
         # Get unique scores for x-axis
@@ -78,8 +86,8 @@ def plot_score_proportions(compare_files, metric, output_image=None):
         # Plot as lines
         # Plot stacked bars for each score threshold
         # Create a base color for this label using a consistent mapping
-        label_index = list(compare_files.keys()).index(label)
-        base_color = plt.cm.Pastel1(label_index / len(compare_files))
+        label_index = list(data_dicts.keys()).index(label)
+        base_color = plt.cm.Pastel1(label_index / len(data_dicts))
 
         bottom = 0
         for i, prop in reversed(list(enumerate(proportions))):
@@ -106,26 +114,138 @@ def plot_score_proportions(compare_files, metric, output_image=None):
         plt.savefig(output_image, dpi=300, bbox_inches='tight')
     plt.show()
 
+def check_references_match(data_dicts):
+    references = {}
+    for data_type, data_dict in data_dicts.items():
+        for index, item in data_dict.items():
+            references[int(index)] = item["reference"]
+        break
+
+    for data_type, data_dict in data_dicts.items():
+        for index, item in data_dict.items():
+            if item["reference"] != references[int(index)]:
+                print(f"{data_type} {index} {item['reference']} != {references[int(index)]}")
+
+def get_correlation_matrix_between_metrics(data_dict, metrics):
+    """ correlation between metrics for each item in data_dict """
+    # Get all scores for each metric
+    all_scores = defaultdict(list)
+    scores = get_scores(list(data_dict.values()))
+
+    # convert scores[item_index]["metric"] to scores[metric][item_index]
+    for metric in metrics:
+        for score in scores:
+            all_scores[metric].append(score[metric])
+
+    # Get correlation matrix
+    corr_matrix = np.corrcoef(list(all_scores.values()))
+    return corr_matrix
+
+def plot_correlation_matrix_between_metrics(data_dict, metrics):
+    corr_matrix = get_correlation_matrix_between_metrics(data_dict, metrics)
+    corr_matrix = pd.DataFrame(corr_matrix, index=metrics, columns=metrics)
+    sns.heatmap(corr_matrix, annot=True, cmap="YlGnBu", vmin=0, vmax=1)
+    plt.yticks(np.arange(len(metrics))+0.5, metrics, rotation=0)
+    plt.title("Correlation Matrix of Metrics")
+    plt.show()
+    return corr_matrix
+
+def get_correlation_matrix_between_types(data_dicts, metric):
+    """ correlation between score for the same metric between items in data_dict
+    """
+    if not np.all([len(v) == len(list(data_dicts.values())[0]) for v in data_dicts.values()]):
+        data_dicts = get_data_dict_with_common_indices(data_dicts)
+    check_references_match(data_dicts)
+
+    all_scores = defaultdict(list)
+    for data_type, data_dict in data_dicts.items():
+        scores = get_scores(list(data_dict.values()))
+        for score in scores:
+            all_scores[data_type].append(score[metric])
+
+    # Get correlation matrix
+    corr_matrix = np.corrcoef(list(all_scores.values()))
+    return corr_matrix
+
+def plot_correlation_matrix_between_types(data_dicts, metric):
+    corr_matrix = get_correlation_matrix_between_types(data_dicts, metric)
+    corr_matrix = pd.DataFrame(corr_matrix, index=data_dicts.keys(), columns=data_dicts.keys())
+    sns.heatmap(corr_matrix, annot=True, cmap="YlGnBu", vmin=0, vmax=1)
+    plt.title(metric)
+    plt.show()
+    return corr_matrix
+
+
+
+
+def get_data_dict_with_common_indices(data_dicts, compare_len=True):
+
+    if compare_len:
+        # check number of items in each data_dict before
+        len_before = [len(v) for v in data_dicts.values()]
+
+        # save average length of reference and comparison before
+        mean_lens = {}
+        get_len = lambda x, key: int(np.mean([len(v[key]) for v in x.values()]))
+        for type, data_dict in data_dicts.items():
+            mean_lens[type] = (get_len(data_dict, "reference"), get_len(data_dict, "comparison"))
+
+
+    data_dicts = data_dicts.copy()
+    indices = {}
+    for k, v in data_dicts.items():
+        indices[k] = [item["index"] for item in v.values()]
+
+    common_indices = None
+    for k, v in indices.items():
+        if common_indices is None:
+            common_indices = set(v)
+        common_indices.intersection_update(v)
+
+    for ref_type, data_dict in data_dicts.items():
+        data_dicts[ref_type] = {str(k): v for k, v in data_dict.items() if int(k) in common_indices}
+
+
+    if compare_len:
+        len_after = [len(v) for v in data_dicts.values()]
+        for idx, (type, data_dict) in enumerate(data_dicts.items()):
+            mean_len_curr = (get_len(data_dict, "reference"), get_len(data_dict, "comparison"))
+            print(f"{type:12}"
+                  f" Ref comp: {mean_lens[ref_type]} -> {mean_len_curr}"
+                  f" Len: {len_before[idx]:5} -> {len_after[idx]:5}")
+    return data_dicts
+
 if __name__ == "__main__":
 
     # Manually list the files.
-    compare_files = {
-        "mlp-train": "processed_rubrics/log5_mlp-train.jsonl",
-        "linear-train": "processed_rubrics/log5_linear-train.jsonl",
+    with open("processed_rubrics/all_data_dicts.json", "r") as f:
+        data_dicts = json.load(f)
 
-        "mlp": "processed_rubrics/ruberic_log_4o_best.jsonl_mlp.jsonl",
-        "linear": "processed_rubrics/ruberic_log_4o_2.jsonl_linear.jsonl",
-        "continued": "processed_rubrics/log4.txt_continued.jsonl",
-        "baseline": "processed_rubrics/log4.txt_baseline.jsonl",
-        "cheat-1": "processed_rubrics/log4.txt_cheat-1.jsonl",
-        "cheat-5": "processed_rubrics/log4.txt_cheat-5.jsonl",
-        "cheat-10": "processed_rubrics/log4.txt_cheat-10.jsonl",
-        "regenerated": "processed_rubrics/log4.txt_regenerated.jsonl",
-        "auto-decoded": "processed_rubrics/log4.txt_auto-decoded.jsonl"
-    }
+    # del data_dicts["cheat-10"]
+    get_len = lambda x, key: int(np.mean([len(v[key]) for v in x.values()]))
+
+    a = data_dicts["regenerated"]
+    b = data_dicts["cheat-10"]
+    indices_a = [item["index"] for item in a.values()]
+    indices_b = [item["index"] for item in b.values()]
+    short_indices = set(indices_a) - set(indices_b)
+    print("Num short indices:", len(short_indices))
+    for idx in sorted(short_indices)[:10]:
+        print(idx, {"short": a[str(idx)]["reference"]})
+
+    data_dicts = get_data_dict_with_common_indices(data_dicts)
+
 
     metrics = ["complexity", "coherence", "structure", "subject", "entities", "details", "terminology", "tone"]
+    # metrics = ["coherence", "structure", "subject", "entities", "details"]
+
     for metric in metrics:
-        plot_score_proportions(compare_files, metric, f"{metric}.png")
+        plot_score_proportions(data_dicts, metric, f"{metric}.png")
+
+    # for data_type, data_dict in data_dicts.items():
+    #     plot_correlation_matrix(data_dict, metrics)
+
+    # for metric in metrics:
+    #     plot_correlation_matrix_between_types(data_dicts, metric)
 
 # %%
