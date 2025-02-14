@@ -8,9 +8,127 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from collections import defaultdict
 import plotly.graph_objects as go
+from scipy import stats
+from sklearn.metrics import cohen_kappa_score
 
-from utils_plot import load_rubric_results, process_scores, load_result
 
+def load_result(result: str | dict) -> dict:
+    if isinstance(result, str):
+        return json.loads(result)
+    else:
+        return result
+
+def get_scores(data_list: list[dict]) -> list[dict]:
+    # Convert string JSON to dict if needed
+    scores = []
+    for idx, item in enumerate(data_list):
+        result = load_result(item['result'])
+        scores.append(result["scoring"])
+    return scores
+
+
+def process_scores(data_list: list[dict], metric: str) -> list[float]:
+    # Convert string JSON to dict if needed
+    scores = []
+    for item in get_scores(data_list):
+        score = item[metric]
+        # if item["coherence"] < 2:
+        #     continue
+        # if score == -1:
+        #     continue
+        scores.append(score)
+    return scores
+
+
+# Loading data
+##############
+
+def run_references_match_check(data_dicts: dict, verbose=False):
+    references = {}
+    for data_type, data_dict in data_dicts.items():
+        for index, item in data_dict.items():
+            references[int(index)] = item["reference"]
+        break
+
+    for data_type, data_dict in data_dicts.items():
+        for index, item in data_dict.items():
+            if item["reference"] != references[int(index)]:
+                if verbose:
+                    print(f"{data_type} {index} {item['reference']} != {references[int(index)]}")
+
+def run_short_indices_check(data_dicts, verbose=False):
+    get_len = lambda x, key: int(np.mean([len(v[key]) for v in x.values()]))
+
+    a = data_dicts["regenerated"]
+    b = data_dicts["cheat-10"]
+    indices_a = [item["index"] for item in a.values()]
+    indices_b = [item["index"] for item in b.values()]
+    short_indices = set(indices_a) - set(indices_b)
+    if verbose:
+        print("Num short indices:", len(short_indices))
+        for idx in sorted(short_indices)[:10]:
+            print(idx, {"short": a[str(idx)]["reference"]})
+
+def get_data_dict_with_common_indices(data_dicts, compare_len=True, verbose=False):
+    if compare_len:
+        # check number of items in each data_dict before
+        len_before = [len(v) for v in data_dicts.values()]
+
+        # save average length of reference and comparison before
+        mean_lens = {}
+        get_len = lambda x, key: int(np.mean([len(v[key]) for v in x.values()]))
+        for type, data_dict in data_dicts.items():
+            mean_lens[type] = (get_len(data_dict, "reference"), get_len(data_dict, "comparison"))
+
+
+    data_dicts = data_dicts.copy()
+    indices = {}
+    for k, v in data_dicts.items():
+        indices[k] = [item["index"] for item in v.values()]
+
+    common_indices = None
+    for k, v in indices.items():
+        if common_indices is None:
+            common_indices = set(v)
+        common_indices.intersection_update(v)
+
+    for ref_type, data_dict in data_dicts.items():
+        data_dicts[ref_type] = {str(k): v for k, v in data_dict.items() if int(k) in common_indices}
+
+
+    if compare_len:
+        len_after = [len(v) for v in data_dicts.values()]
+        for idx, (type, data_dict) in enumerate(data_dicts.items()):
+            mean_len_curr = (get_len(data_dict, "reference"), get_len(data_dict, "comparison"))
+            if verbose:
+                print(f"{type:12}"
+                      f" Ref comp: {mean_lens[ref_type]} -> {mean_len_curr}"
+                      f" Len: {len_before[idx]:5} -> {len_after[idx]:5}")
+    return data_dicts
+
+def load_rubric_results(file_path="processed_rubrics/all_data_dicts.json",
+        indices_intersection=False,
+        check_short_indices=False,
+        check_references_match=False,
+        verbose=False,
+    ):
+    with open(file_path, "r") as f:
+        data_dicts = json.load(f)
+
+
+    if check_short_indices:
+        verbose and print("Checking short indices")
+        run_short_indices_check(data_dicts, verbose=verbose)
+
+    if indices_intersection:
+        verbose and print("Getting data_dicts with common indices")
+        data_dicts = get_data_dict_with_common_indices(data_dicts, verbose=verbose)
+
+    if check_references_match:
+        verbose and print("Checking references match")
+        assert indices_intersection, "check_references_match requires indices_intersection"
+        run_references_match_check(data_dicts, verbose=verbose)
+    return data_dicts
 
 def calculate_score_proportions(scores, cumulative=False):
     total = len(scores)
@@ -68,7 +186,7 @@ def plot_score_proportions(data_dicts, metric, output_image=None):
                     ha='center', va='center')
             bottom += prop
 
-    # plt.xlabel(f'{metric} Score Threshold')
+    plt.xlabel(f'{metric} Score Threshold')
     plt.ylabel('Proportion >= Score')
     plt.title(f'Cumulative Score Distribution for {metric.capitalize()} ({unique_scores[0]} to {unique_scores[-1]})')
     plt.grid(True, alpha=0.3)
@@ -135,15 +253,9 @@ def plot_score_proportions_interactive(data_dicts, metric):
 
     fig.update_layout(
         title=f'Cumulative Score Distribution for {metric.capitalize()} ({unique_scores[0]} to {unique_scores[-1]})',
-        # xaxis_title=f'{metric} Score Threshold',
+        xaxis_title=f'{metric} Score Threshold',
         yaxis_title='Proportion >= Score',
-        barmode='stack',
-        xaxis=dict(
-            tickangle=-30  # Tilt labels diagonally up to the right
-        ),
-        margin=dict(l=20, r=20, t=40, b=20),  # Reduce margins
-        font=dict(size=10),  # Reduce font size
-        autosize=True  # Automatically adjust figure size
+        barmode='stack'
     )
 
     # hide legend
@@ -154,33 +266,18 @@ def plot_score_proportions_interactive(data_dicts, metric):
 
     fig.show(renderer="notebook_connected")
 
-def check_references_match(data_dicts):
-    references = {}
-    for data_type, data_dict in data_dicts.items():
-        for index, item in data_dict.items():
-            references[int(index)] = item["reference"]
-        break
-
-    for data_type, data_dict in data_dicts.items():
-        for index, item in data_dict.items():
-            if item["reference"] != references[int(index)]:
-                print(f"{data_type} {index} {item['reference']} != {references[int(index)]}")
-
 if __name__ == "__main__":
 
-    # Manually list the files.
     data_dicts = load_rubric_results(
         file_path="processed_rubrics/all_data_dicts.json",
-        indices_intersection=False,
-        check_short_indices=False,
-        check_references_match=False,
+        indices_intersection=True,
+        check_short_indices=True,
+        check_references_match=True,
+        verbose=True,
     )
 
+    metrics = ["complexity", "coherence", "structure", "subject", "entities", "details", "terminology", "tone", "length"]
 
-    metrics = ["complexity", "coherence", "structure", "subject", "entities", "details", "terminology", "tone"]
-    # metrics = ["coherence", "structure", "subject", "entities", "details"]
-
-    for metric in metrics:
-        plot_score_proportions_interactive(data_dicts, metric)
+    print("Loaded data_dicts:", list(data_dicts.keys()))
 
 # %%
