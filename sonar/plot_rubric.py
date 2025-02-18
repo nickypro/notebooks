@@ -94,6 +94,7 @@ def get_examples(data_dict, metric, shuffle=True, limit=10):
 
 def plot_score_proportions_interactive(data_dicts, metric):
     fig = go.Figure()
+    df_proportions = pd.DataFrame()
 
     for label, data_dict in data_dicts.items():
         data_list = list(data_dict.values())
@@ -101,6 +102,11 @@ def plot_score_proportions_interactive(data_dicts, metric):
         proportions = calculate_score_proportions(scores)
         unique_scores = sorted(set(scores))
         examples = get_examples(data_dict, metric, limit=5) # examples[score]["reference"]
+
+        cumulative_proportions = []
+        for i, prop in enumerate(proportions):
+            cumulative_proportions.append(sum(proportions[i:]))
+        df_proportions = pd.concat([df_proportions, pd.DataFrame({"label": label, "score": unique_scores, "proportion": cumulative_proportions})])
 
         label_index = list(data_dicts.keys()).index(label)
 
@@ -153,6 +159,24 @@ def plot_score_proportions_interactive(data_dicts, metric):
     fig.write_image(f"./figures/score_distribution_{metric}.png")
 
     fig.show(renderer="notebook_connected")
+    # Create a nicely formatted table showing score distributions
+    print(f"\n{metric.capitalize()} Score Cumulative Distribution Table")
+    print("-" * 65)
+    print("Model      | Score -1 | Score 0  | Score 1  | Score 2  | Score 3  |")
+    print("-" * 65)
+
+    for label in df_proportions['label'].unique():
+        model_data = df_proportions[df_proportions['label'] == label]
+        proportions = model_data['proportion'].values
+        # Handle cases where we don't have all 5 scores
+        row = f"{label:<10} |"
+        for i in range(5):
+            if i < len(proportions):
+                row += f" {proportions[i]:8.2%} |"
+            else:
+                row += f" {'N/A':>8} |"
+        print(row)
+    print("-" * 65)
 
 def check_references_match(data_dicts):
     references = {}
@@ -171,14 +195,14 @@ if __name__ == "__main__":
     # Manually list the files.
     data_dicts = load_rubric_results(
         file_path="processed_rubrics/all_data_dicts.json",
-        indices_intersection=False,
+        indices_intersection=True,
         check_short_indices=False,
         check_references_match=False,
     )
 
 
-    metrics = ["complexity", "coherence", "structure", "subject", "entities", "details", "terminology", "tone"]
-    # metrics = ["coherence", "structure", "subject", "entities", "details"]
+    # metrics = ["complexity", "coherence", "structure", "subject", "entities", "details", "terminology", "tone"]
+    metrics = ["coherence", "subject", "entities", "details"]
 
     for metric in metrics:
         plot_score_proportions_interactive(data_dicts, metric)
