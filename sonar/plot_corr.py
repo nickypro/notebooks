@@ -41,6 +41,9 @@ def get_correlation_matrix(values, method='spearman'):
                 corr_matrix[i, j] = corr
 
     return corr_matrix
+
+# between metrics
+
 def get_correlation_matrix_between_metrics(data_dict: list[dict], metrics: list, method: str ='spearman'):
     """ correlation between metrics for each item in data_dict """
     # Get all scores for each metric
@@ -66,12 +69,15 @@ def get_correlation_matrix_between_metrics(data_dict: list[dict], metrics: list,
 def plot_correlation_matrix_between_metrics(data_dict, metrics, type=None, method='spearman'):
     corr_matrix = get_correlation_matrix_between_metrics(data_dict, metrics, method=method)
     corr_matrix = pd.DataFrame(corr_matrix, index=metrics, columns=metrics)
+    metric_labels = [metric.capitalize() if metric != "cosine_similarity" else "Cos-Sim" for metric in metrics]
     fig = plt.figure()
-    sns.heatmap(corr_matrix, annot=True, cmap="YlGnBu", vmin=0, vmax=1, fmt='.2f')
-    plt.yticks(np.arange(len(metrics))+0.5, metrics, rotation=0)
-    plt.xticks(np.arange(len(metrics))+0.5, metrics, rotation=30, ha='right')
-    plt.title(f"Correlation Matrix of Metrics ({type})")
+    sns.heatmap(corr_matrix, annot=True, cmap="YlGnBu", vmin=0, vmax=1, fmt='.2f', annot_kws={'size': 16}, cbar=False, square=True)
+    plt.yticks(np.arange(len(metrics))+0.5, metric_labels, rotation=0, fontsize=14)
+    plt.xticks(np.arange(len(metrics))+0.5, metric_labels, rotation=30, ha='right', fontsize=14)
+    plt.title(f"{method.capitalize()} Correlation of {type.capitalize()}", fontsize=16)
     return fig
+
+# between types
 
 def get_correlation_matrix_between_types(data_dicts, metric, method='spearman'):
     """ correlation between score for the same metric between items in data_dict
@@ -97,30 +103,43 @@ def plot_correlation_matrix_between_types(data_dicts, metric, method='spearman')
     corr_matrix = get_correlation_matrix_between_types(data_dicts, metric, method=method)
     corr_matrix = pd.DataFrame(corr_matrix, index=data_dicts.keys(), columns=data_dicts.keys())
     fig = plt.figure()
-    sns.heatmap(corr_matrix, annot=True, cmap="YlGnBu", vmin=0, vmax=1, fmt='.2f')
-    plt.title(metric)
-    plt.xticks(np.arange(len(data_dicts.keys()))+0.5, data_dicts.keys(), rotation=30, ha='right')
-    plt.yticks(np.arange(len(data_dicts.keys()))+0.5, data_dicts.keys(), rotation=0)
+    sns.heatmap(corr_matrix, annot=True, cmap="YlGnBu", vmin=0, vmax=1, fmt='.2f', annot_kws={'size': 12}, cbar=False, square=True)
+    plt.title(f"{method.capitalize()} Correlation of {metric.capitalize()}", fontsize=16)
+    plt.xticks(np.arange(len(data_dicts.keys()))+0.5, data_dicts.keys(), rotation=30, ha='right', fontsize=14)
+    plt.yticks(np.arange(len(data_dicts.keys()))+0.5, data_dicts.keys(), rotation=0, fontsize=14)
     return fig
 
 #######################################
 
 if __name__ == "__main__":
     data_dicts = load_rubric_results(
-        file_path="processed_rubrics/all_data_dicts.json",
+        file_path="processed_rubrics/all_data_with_cossim.json",
         indices_intersection=True,
         check_short_indices=False,
         check_references_match=False,
     )
 
-    metrics = ["complexity", "coherence", "structure", "subject", "entities", "details", "terminology", "tone", "length"]
+    # metrics = ["cosine_similarity", "complexity", "coherence", "structure", "subject", "entities", "details", "terminology", "tone", "length"]
+    metrics = ["cosine_similarity", "coherence", "subject", "entities", "details", "length"]
+    # metrics = ["length", "subject"]
 
-    for metric in metrics:
-        fig = plot_correlation_matrix_between_types(data_dicts, metric, method='spearman')
-        fig.savefig(f"figures/correlation_matrix_between_types_{metric}.png")
+    method = 'kendalltau'
 
-    for data_type, data_dict in data_dicts.items():
-        fig = plot_correlation_matrix_between_metrics(data_dict, metrics, type=data_type, method='spearman')
-        fig.savefig(f"figures/correlation_matrix_between_metrics_{data_type}.png")
+    for index, metric in enumerate(metrics):
+        fig = plot_correlation_matrix_between_types(data_dicts, metric, method=method)
+        # if index > 0:
+        #     axes = fig.get_axes()
+        #     axes[0].set_yticklabels([])
+        fig.savefig(f"figures/correlation_matrix_between_types_{metric}.png", bbox_inches='tight')
+
+    data_types = ["linear", "continued", "regenerated"]
+    filtered_data_dicts = {k: data_dicts[k] for k in data_types}
+
+    for index, (data_type, data_dict) in enumerate(filtered_data_dicts.items()):
+        fig = plot_correlation_matrix_between_metrics(data_dict, metrics, type=data_type, method=method)
+        # if index > 0:
+        #     axes = fig.get_axes()
+        #     axes[0].set_yticklabels([])
+        fig.savefig(f"figures/correlation_matrix_between_metrics_{data_type}.png", bbox_inches='tight')
 
 # %%
