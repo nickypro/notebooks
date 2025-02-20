@@ -100,9 +100,9 @@ def plot_cosine_similarity_violin(df_plot, output_image):
         # Use RGB colors instead of HSLA since seaborn doesn't support HSLA
         hue = i * 150 % 360
         # Convert HSL to RGB (approximation)
-        r = 0.5 + 0.5 * np.cos(np.radians(hue))
-        g = 0.5 + 0.5 * np.cos(np.radians(hue - 120))
-        b = 0.5 + 0.5 * np.cos(np.radians(hue + 120))
+        r = 0.6 + 0.3 * np.cos(np.radians(hue))
+        g = 0.6 + 0.3 * np.cos(np.radians(hue - 120))
+        b = 0.6 + 0.3 * np.cos(np.radians(hue + 120))
         palette[label] = (r, g, b)
 
     sns.violinplot(data=df_plot, x="Comparison Type", y="Cosine Similarity", hue="Comparison Type", palette=palette, scale="width", legend=False)
